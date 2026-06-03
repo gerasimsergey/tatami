@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/OleksandrBesan/tatami/internal/docker"
 	"github.com/OleksandrBesan/tatami/internal/git"
 )
 
@@ -28,9 +29,10 @@ type WorktreeView struct {
 	branchInput textinput.Model
 	suggestions []string
 	suggCursor  int
-	deleteIndex int
-	errorMsg    string
-	selected    *git.Worktree
+	deleteIndex      int
+	dockerResources  *docker.Resources
+	errorMsg         string
+	selected         *git.Worktree
 }
 
 // NewWorktreeView creates a new worktree view
@@ -110,6 +112,7 @@ func (w *WorktreeView) updateList(msg tea.KeyMsg) tea.Cmd {
 		// Delete only non-main worktrees
 		if w.cursor < len(w.worktrees) && !w.worktrees[w.cursor].IsMain {
 			w.deleteIndex = w.cursor
+			w.dockerResources = docker.FindResources(w.worktrees[w.cursor].Path)
 			w.mode = WorktreeModeConfirmDelete
 		}
 	case "enter":
@@ -185,19 +188,40 @@ func (w *WorktreeView) updateCreate(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (w *WorktreeView) updateConfirmDelete(msg tea.KeyMsg) tea.Cmd {
+	hasDocker := w.dockerResources != nil && w.dockerResources.HasResources()
+
 	switch msg.String() {
 	case "y", "Y":
-		// Delete the worktree
 		wt := w.worktrees[w.deleteIndex]
+		// When Docker resources exist, [y] deletes worktree + cleans Docker
+		if hasDocker {
+			docker.Cleanup(wt.Path, w.dockerResources)
+		}
 		if err := git.RemoveWorktree(w.repoPath, wt.Path); err != nil {
 			w.errorMsg = "Failed to remove worktree: " + err.Error()
 		}
+		w.dockerResources = nil
 		w.refresh()
 		if w.cursor >= len(w.worktrees) {
 			w.cursor = len(w.worktrees)
 		}
 		w.mode = WorktreeModeList
+	case "w", "W":
+		// Worktree only (skip Docker cleanup)
+		if hasDocker {
+			wt := w.worktrees[w.deleteIndex]
+			if err := git.RemoveWorktree(w.repoPath, wt.Path); err != nil {
+				w.errorMsg = "Failed to remove worktree: " + err.Error()
+			}
+			w.dockerResources = nil
+			w.refresh()
+			if w.cursor >= len(w.worktrees) {
+				w.cursor = len(w.worktrees)
+			}
+			w.mode = WorktreeModeList
+		}
 	case "n", "N", "esc":
+		w.dockerResources = nil
 		w.mode = WorktreeModeList
 	}
 	return nil
@@ -348,8 +372,33 @@ func (w *WorktreeView) viewConfirmDelete() string {
 	b.WriteString(selectedStyle.Render(wt.Branch))
 	b.WriteString("?\n\n")
 	b.WriteString(mutedStyle.Render("Path: " + wt.Path))
-	b.WriteString("\n\n")
-	b.WriteString("[y]es  [n]o")
+
+	hasDocker := w.dockerResources != nil && w.dockerResources.HasResources()
+	if hasDocker {
+		b.WriteString("\n\n")
+		b.WriteString(labelStyle.Render("Docker resources found:"))
+		b.WriteString("\n")
+		if len(w.dockerResources.Containers) > 0 {
+			b.WriteString("  Containers: ")
+			b.WriteString(normalStyle.Render(strings.Join(w.dockerResources.Containers, ", ")))
+			b.WriteString("\n")
+		}
+		if len(w.dockerResources.Volumes) > 0 {
+			b.WriteString("  Volumes:    ")
+			b.WriteString(normalStyle.Render(strings.Join(w.dockerResources.Volumes, ", ")))
+			b.WriteString("\n")
+		}
+		if len(w.dockerResources.Networks) > 0 {
+			b.WriteString("  Networks:   ")
+			b.WriteString(normalStyle.Render(strings.Join(w.dockerResources.Networks, ", ")))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+		b.WriteString("[y]es (worktree + docker)  [w]orktree only  [n]o")
+	} else {
+		b.WriteString("\n\n")
+		b.WriteString("[y]es  [n]o")
+	}
 
 	return boxStyle.Render(b.String())
 }
