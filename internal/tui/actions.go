@@ -18,6 +18,7 @@ const (
 	ActionWithLayout
 	ActionWithTemplate
 	ActionWorktree
+	ActionAttachSession
 )
 
 // ActionView displays the action menu

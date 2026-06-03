@@ -21,14 +21,16 @@ const (
 	ViewFolderInput
 	ViewWorktree
 	ViewWorktreeActions
+	ViewSessions
 )
 
 // Result represents the outcome of the TUI session
 type Result struct {
-	Action    Action
-	Workspace *workspace.Workspace
-	Template  *workspace.Template
-	Worktree  *git.Worktree
+	Action      Action
+	Workspace   *workspace.Workspace
+	Template    *workspace.Template
+	Worktree    *git.Worktree
+	SessionName string
 }
 
 // App is the main Bubbletea model
@@ -46,6 +48,7 @@ type App struct {
 	folderInput        *FolderInput
 	worktreeView       *WorktreeView
 	worktreeActionView *WorktreeActionView
+	sessionView        *SessionView
 	result             *Result
 	width              int
 	height             int
@@ -57,12 +60,15 @@ func NewApp(store *workspace.Store) *App {
 	zellij := shell.NewZellijRunner()
 	tmux := shell.NewTmuxRunner()
 
+	listView := NewListView(store)
+	listView.SetInZellij(zellij.IsInsideSession())
+
 	return &App{
 		store:        store,
 		zellij:       zellij,
 		tmux:         tmux,
 		currentView:  ViewList,
-		listView:     NewListView(store),
+		listView:     listView,
 		createView:   NewCreateView(),
 		layoutEditor: NewLayoutEditor(),
 	}
@@ -111,6 +117,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.updateWorktree(msg)
 		case ViewWorktreeActions:
 			return a.updateWorktreeActions(msg)
+		case ViewSessions:
+			return a.updateSessions(msg)
 		}
 	}
 
@@ -219,6 +227,13 @@ func (a *App) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Create folder
 		a.folderInput = NewFolderInput(a.listView.CurrentFolder())
 		a.currentView = ViewFolderInput
+		return a, nil
+
+	case "z":
+		// Open Zellij session browser
+		// canAttach is false when inside Zellij (nested attach doesn't work)
+		a.sessionView = NewSessionView(!a.zellij.IsInsideSession())
+		a.currentView = ViewSessions
 		return a, nil
 
 	default:
@@ -453,6 +468,33 @@ func (a *App) updateWorktreeActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+func (a *App) updateSessions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		// Only go back if in list mode
+		if a.sessionView.Mode() == SessionModeList {
+			a.currentView = ViewList
+			return a, nil
+		}
+
+	case "enter":
+		// Attach to selected session (only if allowed and not current)
+		if a.sessionView.Mode() == SessionModeList && a.sessionView.CanAttach() {
+			sessionName := a.sessionView.Selected()
+			if sessionName != "" && !a.sessionView.IsCurrentSession() {
+				a.result = &Result{
+					Action:      ActionAttachSession,
+					SessionName: sessionName,
+				}
+				return a, tea.Quit
+			}
+		}
+	}
+
+	// Let session view handle the input
+	return a, a.sessionView.Update(msg)
+}
+
 // View implements tea.Model
 func (a *App) View() string {
 	if a.err != nil {
@@ -476,6 +518,8 @@ func (a *App) View() string {
 		return a.worktreeView.View()
 	case ViewWorktreeActions:
 		return a.worktreeActionView.View()
+	case ViewSessions:
+		return a.sessionView.View()
 	default:
 		return ""
 	}

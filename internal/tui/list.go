@@ -26,6 +26,7 @@ type ListView struct {
 	currentFolder string // Current folder path (empty = root)
 	filter        textinput.Model
 	filtering     bool
+	inZellij      bool
 	width         int
 	height        int
 }
@@ -199,6 +200,11 @@ func (l *ListView) SetCurrentFolder(folder string) {
 	l.refreshItems()
 }
 
+// SetInZellij sets whether we're inside a Zellij session
+func (l *ListView) SetInZellij(inZellij bool) {
+	l.inZellij = inZellij
+}
+
 // Update handles input for the list view
 func (l *ListView) Update(msg tea.Msg) tea.Cmd {
 	if l.filtering {
@@ -365,11 +371,15 @@ func (l *ListView) View() string {
 	}
 
 	// Help text
-	help := "[n]ew  [e]dit  [d]elete  [*]star  [f]older  [/]filter  [q]uit"
+	var help string
 	if l.filtering {
 		help = "[enter]confirm  [esc]cancel"
 	} else if l.currentFolder != "" {
 		help = "[h/←]back  [n]ew  [e]dit  [d]elete  [*]star  [q]uit"
+	} else if l.inZellij {
+		help = "[n]ew  [e]dit  [d]elete  [*]star  [f]older  [z]ellij  [/]filter  [q]uit"
+	} else {
+		help = "[n]ew  [e]dit  [d]elete  [*]star  [f]older  [/]filter  [q]uit"
 	}
 	b.WriteString(helpStyle.Render(help))
 

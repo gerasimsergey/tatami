@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/OleksandrBesan/tatami/internal/config"
@@ -70,6 +71,22 @@ func copyToClipboard(text string) error {
 }
 
 func handleResult(result *tui.Result) error {
+	// Handle session attachment first (doesn't need workspace)
+	if result.Action == tui.ActionAttachSession {
+		if result.SessionName == "" {
+			return fmt.Errorf("no session selected")
+		}
+		// Use syscall.Exec to replace current process with zellij attach
+		// This is necessary because the TUI uses alternate screen and
+		// zellij attach needs full terminal control
+		zellijPath, err := exec.LookPath("zellij")
+		if err != nil {
+			return fmt.Errorf("zellij not found: %w", err)
+		}
+		args := shell.AttachSessionCmd(result.SessionName)
+		return syscall.Exec(zellijPath, args, os.Environ())
+	}
+
 	ws := result.Workspace
 	zellij := shell.NewZellijRunner()
 	tmux := shell.NewTmuxRunner()
