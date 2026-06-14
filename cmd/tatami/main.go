@@ -48,7 +48,20 @@ func run() error {
 
 	// Create and run the TUI app
 	app := tui.NewApp(store)
-	p := tea.NewProgram(app, tea.WithAltScreen())
+
+	// When running inside the shell wrapper (TATAMI_WRAPPER=1), stdout is redirected
+	// to a temp file to capture the result path. We must attach the TUI to /dev/tty
+	// directly so the UI renders in the terminal regardless of stdout redirection.
+	var opts []tea.ProgramOption
+	opts = append(opts, tea.WithAltScreen())
+	if os.Getenv("TATAMI_WRAPPER") == "1" {
+		tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+		if err == nil {
+			opts = append(opts, tea.WithInput(tty), tea.WithOutput(tty))
+			defer tty.Close()
+		}
+	}
+	p := tea.NewProgram(app, opts...)
 
 	finalModel, err := p.Run()
 	if err != nil {
