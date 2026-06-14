@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/OleksandrBesan/tatami/internal/config"
 	"github.com/OleksandrBesan/tatami/internal/shell"
 	"github.com/OleksandrBesan/tatami/internal/tui"
@@ -40,6 +41,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize store: %w", err)
 	}
+
+	// Prevent lipgloss from blocking on OSC 11 terminal background color query.
+	// Some terminals don't respond to OSC queries, causing a 5s hang on first render.
+	lipgloss.SetHasDarkBackground(true)
 
 	// Create and run the TUI app
 	app := tui.NewApp(store)
